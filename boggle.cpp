@@ -91,9 +91,68 @@ std::set<std::string> boggle(const std::set<std::string>& dict, const std::set<s
 	return result;
 }
 
-bool boggleHelper(const std::set<std::string>& dict, const std::set<std::string>& prefix, const std::vector<std::vector<char> >& board, 
-								   std::string word, std::set<std::string>& result, unsigned int r, unsigned int c, int dr, int dc)
+bool boggleHelper(const std::set<std::string>& dict, const std::set<std::string>& prefix, const std::vector<std::vector<char> >& board,
+                  std::string word, std::set<std::string>& result, unsigned int r, unsigned int c, int dr, int dc)
 {
-//add your solution here!
+  //add your solution here!
+
+
+  // Need to do corner cases, add the new character, check if its a prefix so it can make words, and then recursively check through the next cells to see if there are words
+
+
+  // Corner case if its out of bounds
+  if (r >= board.size() || c >= board[0].size()) {
+
+
+    return false;
+  }
+
+
+  // Increment the word with the character
+  word += board[r][c];
+
+
+
+
+  bool better = false;
+  std::string best = "";
+
+  // Check if the word is in the dictionary
+  if (dict.find(word) != dict.end()) {
+    best = word;
+    better = true;
+  }
+
+
+  std::set<std::string> temp;
+  bool next = boggleHelper(dict, prefix, board, word, temp, r + dr, c + dc, dr, dc);
+
+  // Go through the different letterfs and change better to true if theres a longer version
+  for (std::set<std::string>::iterator it = temp.begin(); it != temp.end(); ++it) {
+      if (it->length() > best.length()) {
+          best = *it;
+          better = true;
+      }
+  }
+
+
+
+
+
+  // If the word is better then add it 
+  if (word.length() == 1 && better) {
+    result.insert(best);
+  }
+
+
+  else if (better) {
+    result.insert(best);
+  }
+
+
+  // Return if there was a better word in this check or one down the line
+  return better || next;
+
 
 }
+
