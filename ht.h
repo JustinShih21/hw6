@@ -4,7 +4,8 @@
 #include <iostream>
 #include <cmath>
 
-typedef size_t HASH_INDEX_T;
+typedef size_t HASH_INDEX_T;  
+
 
 
 // Complete - Base Prober class
@@ -35,7 +36,7 @@ struct LinearProber : public Prober<KeyType> {
     {
         // Complete the condition below that indicates failure
         // to find the key or an empty slot
-        if(this->numProbes_ == this->m_) {
+        if(this->numProbes_ >= this->m_) {
             return this->npos; 
         }
         HASH_INDEX_T loc = (this->start_ + this->numProbes_) % this->m_;
@@ -275,6 +276,10 @@ private:
 
     // ADD MORE DATA MEMBERS HERE, AS NECESSARY
 
+    size_t itemCount_;
+    size_t deletedCount_;
+    static const size_t CAP_COUNT = sizeof(CAPACITIES)/sizeof(CAPACITIES[0]);
+    double resizeAlpha_;
 };
 
 // ----------------------------------------------------------------------------
@@ -294,11 +299,13 @@ const HASH_INDEX_T HashTable<K,V,Prober,Hash,KEqual>::CAPACITIES[] =
 template<typename K, typename V, typename Prober, typename Hash, typename KEqual>
 HashTable<K,V,Prober,Hash,KEqual>::HashTable(
     double resizeAlpha, const Prober& prober, const Hasher& hash, const KEqual& kequal)
-       :  hash_(hash), kequal_(kequal), prober_(prober)
+       :  hash_(hash), kequal_(kequal), prober_(prober), resizeAlpha_(resizeAlpha)
 {
     // Initialize any other data members as necessary
     mIndex_ = 0;
     totalProbes_ = 0;
+    itemCount_ = 0;
+    deletedCount_ = 0;
 
     // Resize the table based on the capacity, and filled with nullptrs 
     table_.resize(CAPACITIES[mIndex_], nullptr);
@@ -323,16 +330,16 @@ template<typename K, typename V, typename Prober, typename Hash, typename KEqual
 bool HashTable<K,V,Prober,Hash,KEqual>::empty() const
 {
 
-    // Create an iterator to check if its empty
-    typename std::vector<HashItem*>::const_iterator it;
-    for (it = table_.begin(); it != table_.end(); it++) {
-        if (*it != nullptr && !(*it)->deleted) {
-            return false;
-        }
+    // Empty Check no iterator
+    //for (size_t i=0; i< table_.size(); i++) {
+   ///     if (table_[i] != nullptr && !table_[i]->deleted) {
+    ////        return false;
+    //    }
+    //}
+    //return true;
 
-   
-    }
-    return true;
+
+    return itemCount_==0;
 
 }
 
@@ -341,20 +348,7 @@ template<typename K, typename V, typename Prober, typename Hash, typename KEqual
 size_t HashTable<K,V,Prober,Hash,KEqual>::size() const
 {
 
-    size_t count = 0;
-
-    // Create an iterator
-    typename std::vector<HashItem*>::const_iterator it;
-
-    // Go through everything, incrementing count for everything not empty or deleted
-    for(it = table_.begin(); it != table_.end(); it++) {
-
-        if (*it != nullptr && !(*it)->deleted) {
-            count ++;
-        }
-    }
-
-    return count;
+    return itemCount_;
 }
 
 // To be completed
@@ -362,30 +356,41 @@ template<typename K, typename V, typename Prober, typename Hash, typename KEqual
 void HashTable<K,V,Prober,Hash,KEqual>::insert(const ItemType& p)
 {
     
-    // Corner Case, check if there needs to be more space
-    if (static_cast<double>(size()) / table_.size() >= 0.4){
+    if (double(itemCount_ + deletedCount_)/ table_.size() >= resizeAlpha_){
         resize();
     }
 
     // Corner Case, create an index to probe the item type
     HASH_INDEX_T index = probe(p.first);
+
+  
+    
+   
+
+
+    
+
     if (index == npos) {
-        throw std::logic_error("No available slot found for insertion");
-    }
+            throw std::logic_error("No available slot found for insertion");
+        }
 
     // Corner Case, check if there is a table position already, initialize it if not
     if (table_[index] == nullptr) {
         table_[index] = new HashItem(p);
+        itemCount_++;
     }
 
-
-    else if (table_[index]->deleted) {
+     else if (table_[index]->deleted) {
         table_[index]->item = p;
         table_[index]->deleted = false;
+        itemCount_++;
+        deletedCount_--;
     }
+
     else {
         table_[index]->item.second = p.second;
     }
+
 }
 
 // To be completed
@@ -398,6 +403,8 @@ void HashTable<K,V,Prober,Hash,KEqual>::remove(const KeyType& key)
     // If the hash tables position is not already deleted or empty, set it to deleted
     if (index != npos && table_[index] != nullptr && !table_[index]->deleted) {
         table_[index]->deleted = true;
+        itemCount_--;
+        deletedCount_++;
     }
 
 }
@@ -474,30 +481,40 @@ template<typename K, typename V, typename Prober, typename Hash, typename KEqual
 void HashTable<K,V,Prober,Hash,KEqual>::resize()
 {
 
-    // Check if theres  table capacity for the resize
+    if (mIndex_ + 1 >= CAP_COUNT){
+        throw std::logic_error("No more tables available");
+    }
+    auto old = std::move(table_);
     mIndex_++;
-    if (mIndex_ >= sizeof(CAPACITIES) / sizeof(HASH_INDEX_T)) {
-        throw std::logic_error("No more table capacities available for resize.");
-    }
+    table_.assign(CAPACITIES[mIndex_], nullptr);
+    itemCount_ = deletedCount_ = totalProbes_ = 0;
 
-    //Store the old table in a variable, then clean and resize it
-    std::vector<HashItem*> oldTable = table_;
-    table_.clear();
-    table_.resize(CAPACITIES[mIndex_], nullptr);
+    std::vector<ItemType> itemsToInsert;
 
-    typename std::vector<HashItem*>::iterator it;
 
-    // Insert all the old items into the table
-    for (size_t i = 0; i < oldTable.size(); i ++) {
-        if (oldTable[i] != nullptr && !oldTable[i]->deleted) {
-            insert(oldTable[i]->item);
+        // Go through and add the things into the new table while freeing the old memory
+    for (auto ptr : old) {
+         if (ptr && !ptr->deleted) {
+
+            HASH_INDEX_T h = hash_(ptr->item.first) % CAPACITIES[mIndex_];
+            prober_.init(h, CAPACITIES[mIndex_], ptr->item.first);
+
+            HASH_INDEX_T loc = prober_.next();
+            while(loc != npos && table_[loc] != nullptr) {
+                loc = prober_.next();
+                totalProbes_++;
+            }
+
+            table_[loc] = new HashItem(ptr->item);
+            itemCount_++;
+            
+            
+
         }
-
-        // Delete the old space
-        delete oldTable[i];
+        delete ptr;
     }
 
-    
+
 }
 
 // Almost complete
